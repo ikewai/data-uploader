@@ -1,0 +1,10 @@
+{"upload":
+	[
+        {
+            "local-path": "/path/to/file",
+            "remote-path-absolute": "optional/absolute/remote/directory",
+            "remote-path-temporal": "optional/path/within/yyyy/mm/dd",
+            "rename": "optional-new-file-name"
+        }
+    ]
+}
