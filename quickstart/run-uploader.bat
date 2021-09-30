@@ -1,0 +1,1 @@
+START docker compose up
