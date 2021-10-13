@@ -2,18 +2,28 @@
 
 import json, os
 from agavepy import Agave
+import pickle
 
-ag = Agave(
-    api_key=os.environ.get('TAPIS_API_KEY'),
-    api_secret=os.environ.get('TAPIS_API_SECRET'),
-    client_name=os.environ.get('TAPIS_CLIENT_NAME')
-)
+config = None
 
-# Set up upload directories
-with open("file-upload-list.json") as file_list:
-    files_to_upload: list = json.load(file_list)['upload']
+with open("config.json", "r") as f:
+    config = json.load(f)
+
+#deconstruct config
+use_global_cache: bool = config["use_global_cache"]
+global_cache_file: str = config["global_cache_file"]
+agave_options: dict = config["agave_options"]
+files_to_upload: list = config["upload"]
 
 folder_creation_cache = set()
+if use_global_cache:
+    try:
+        with open(global_cache_file, "rb") as cache:
+            folder_creation_cache = pickle.load(cache)
+    except IOError:
+        print("Could not find global cache. Creating a new one...")
+
+ag = Agave(**agave_options)
 
 # Finally, upload the files. Double-check this
 print(f"Files to upload: {files_to_upload}")
@@ -44,3 +54,8 @@ for file_info in files_to_upload:
             importArgs["rename"] = rename
         res = ag.files.importData(**importArgs)
         print(res)
+
+#dump cache to global if in use
+if use_global_cache:
+    with open(global_cache_file, "wb") as cache:
+        pickle.dump(folder_creation_cache, cache)

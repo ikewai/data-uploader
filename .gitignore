@@ -1,2 +1,4 @@
 test.py
 file-upload-list.json
+*.pk
+config.json
