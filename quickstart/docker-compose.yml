@@ -1,0 +1,11 @@
+version: "3.9"
+   
+services:
+  web:
+    image: "ikewai/data-uploader:latest"
+    command: python3 upload.py
+    volumes:
+    - .:/testmount
+    env_file:
+    - tapis_auth.env
+
