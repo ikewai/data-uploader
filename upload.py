@@ -98,6 +98,7 @@ for file_info in files_to_upload:
 
     rename = file_info.get("rename")
 
+    delete_file = delete_after_upload
     with open(local_path, 'rb') as localFileToUpload:
         #pack import arguments into dict so rename can be excluded if not specified
         args = {
@@ -107,8 +108,7 @@ for file_info in files_to_upload:
         }
         if rename is not None:
             args["fileName"] = rename
-
-        delete_file = delete_after_upload
+        
         try:
             retry_wrapper(ag.files.importData, args, (Exception), retry)
             success += 1
@@ -119,11 +119,11 @@ for file_info in files_to_upload:
             failed += 1
             #do not delete file, not successfully uploaded
             delete_file &= False
-        if delete_file:
-            try:
-                os.remove(local_path)
-            except Exception as e:
-                print("Unable to delete file:\nfile: %s\nerror: %s" % (local_path, repr(e)), file = sys.stderr)
+    if delete_file:
+        try:
+            os.remove(local_path)
+        except Exception as e:
+            print("Unable to delete file:\nfile: %s\nerror: %s" % (local_path, repr(e)), file = sys.stderr)
 
 if print_exec_stats:
     end = time.time()
