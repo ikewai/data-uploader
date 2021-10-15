@@ -17,7 +17,7 @@ def get_backoff(delay):
             backoff = delay * 2 + random.uniform(0, delay)
         return backoff
 
-def retry_wrapper(funct: function, args: dict, exceptions: tuple, retry: int, delay: float = 0):
+def retry_wrapper(funct, args: dict, exceptions: tuple, retry: int, delay: float = 0):
     try:
         funct(**args)
     except exceptions as e:
@@ -109,7 +109,7 @@ for file_info in files_to_upload:
 if print_exec_stats:
     end = time.time()
     duration = end - start
-    print("File uploads complete:\nsuccess: %d, failed: %s, time: %.2f seconds")
+    print("File uploads complete:\nsuccess: %d, failed: %s, time: %.2f seconds" % (success, failed, duration))
 
 #dump cache to global if in use
 if use_global_cache:
