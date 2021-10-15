@@ -6,6 +6,7 @@ import pickle
 import random
 import sys
 import time
+import os
 
 def get_backoff(delay):
         backoff = 0
@@ -40,6 +41,13 @@ agave_options: dict = config["agave_options"]
 files_to_upload: list = config["upload"]
 retry: int = config["retry"]
 print_exec_stats = config.get("print_exec_stats")
+#default to print exec stats if not set
+if print_exec_stats is None:
+    print_exec_stats = True
+delete_after_upload = config.get("delete_after_upload")
+#default not to delete if not set
+if delete_after_upload is None:
+    delete_after_upload = False
 
 folder_creation_cache = {}
 if use_global_cache:
@@ -99,12 +107,23 @@ for file_info in files_to_upload:
         }
         if rename is not None:
             args["fileName"] = rename
+
+        delete_file = delete_after_upload
         try:
             retry_wrapper(ag.files.importData, args, (Exception), retry)
             success += 1
+            #can delete file if delete_after_upload is set
+            delete_file &= True
         except Exception as e:
             print("Unable to upload file:\nlocal: %s\nsystem: %s\nremote: %s\nerror: %s" % (local_path, system_id, remote_path, repr(e)), file = sys.stderr)
             failed += 1
+            #do not delete file, not successfully uploaded
+            delete_file &= False
+        if delete_file:
+            try:
+                os.remove(local_path)
+            except Exception as e:
+                print("Unable to delete file:\nfile: %s\nerror: %s" % (local_path, repr(e)), file = sys.stderr)
 
 if print_exec_stats:
     end = time.time()
