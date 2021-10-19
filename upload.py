@@ -122,7 +122,7 @@ exec_details["time"] = duration
 if print_exec_stats:
     success = len(exec_details["success"])
     failed = len(exec_details["failed"])
-    print("File uploads complete:\nsuccess: %d, failed: %s, time: %.2f seconds" % (success, failed, duration))
+    print("File uploads complete: success: %d, failed: %s, time: %.2f seconds" % (success, failed, duration))
 if write_exec_stats is not None:
     with open(write_exec_stats, "w") as f:
         json.dump(exec_details, f, indent = 4)
