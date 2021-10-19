@@ -40,14 +40,11 @@ global_cache_file: str = config["global_cache_file"]
 agave_options: dict = config["agave_options"]
 files_to_upload: list = config["upload"]
 retry: int = config["retry"]
+write_exec_stats = config.get("write_exec_stats")
 print_exec_stats = config.get("print_exec_stats")
 #default to print exec stats if not set
 if print_exec_stats is None:
     print_exec_stats = True
-delete_after_upload = config.get("delete_after_upload")
-#default not to delete if not set
-if delete_after_upload is None:
-    delete_after_upload = False
 
 folder_creation_cache = {}
 if use_global_cache:
@@ -61,9 +58,12 @@ ag = Agave(**agave_options)
 #create token
 ag.token.create()
 
-success = 0
-failed = 0
 start = time.time()
+exec_details = {
+    "success": [],
+    "failed": [],
+    "time": 0
+}
 
 # Finally, upload the files.
 for file_info in files_to_upload:
@@ -98,7 +98,6 @@ for file_info in files_to_upload:
 
     rename = file_info.get("rename")
 
-    delete_file = delete_after_upload
     with open(local_path, 'rb') as localFileToUpload:
         #pack import arguments into dict so rename can be excluded if not specified
         args = {
@@ -111,27 +110,24 @@ for file_info in files_to_upload:
         
         try:
             retry_wrapper(ag.files.importData, args, (Exception), retry)
-            success += 1
-            #can delete file if delete_after_upload is set
-            delete_file &= True
+            exec_details["success"].append(local_path)
         except Exception as e:
             print("Unable to upload file:\nlocal: %s\nsystem: %s\nremote: %s\nerror: %s" % (local_path, system_id, remote_path, repr(e)), file = sys.stderr)
-            failed += 1
-            #do not delete file, not successfully uploaded
-            delete_file &= False
-    if delete_file:
-        try:
-            os.remove(local_path)
-        except Exception as e:
-            print("Unable to delete file:\nfile: %s\nerror: %s" % (local_path, repr(e)), file = sys.stderr)
+            exec_details["failed"].append(local_path)
 
+
+end = time.time()
+duration = end - start
+exec_details["time"] = duration
 if print_exec_stats:
-    end = time.time()
-    duration = end - start
+    success = len(exec_details["success"])
+    failed = len(exec_details["failed"])
     print("File uploads complete:\nsuccess: %d, failed: %s, time: %.2f seconds" % (success, failed, duration))
+if write_exec_stats is not None:
+    with open(write_exec_stats, "wb") as f:
+        json.dump(exec_details, f, indent = 4)
 
 #dump cache to global if in use
 if use_global_cache:
     with open(global_cache_file, "wb") as cache:
         pickle.dump(folder_creation_cache, cache)
-
