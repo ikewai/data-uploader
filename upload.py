@@ -124,7 +124,7 @@ if print_exec_stats:
     failed = len(exec_details["failed"])
     print("File uploads complete:\nsuccess: %d, failed: %s, time: %.2f seconds" % (success, failed, duration))
 if write_exec_stats is not None:
-    with open(write_exec_stats, "wb") as f:
+    with open(write_exec_stats, "w") as f:
         json.dump(exec_details, f, indent = 4)
 
 #dump cache to global if in use
