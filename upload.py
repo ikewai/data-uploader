@@ -7,6 +7,7 @@ import random
 import sys
 import time
 import os
+from os.path import join, isdir, isfile, relpath
 
 def get_backoff(delay):
         backoff = 0
@@ -35,21 +36,20 @@ with open("config.json", "r") as f:
     config = json.load(f)
 
 #deconstruct config
-use_global_cache: bool = config["use_global_cache"]
-global_cache_file: str = config["global_cache_file"]
 agave_options: dict = config["agave_options"]
 files_to_upload: list = config["upload"]
 retry: int = config["retry"]
-write_exec_stats = config.get("write_exec_stats")
-print_exec_stats = config.get("print_exec_stats")
+global_cache: str = config.get("global_cache")
+write_exec_stats: str = config.get("write_exec_stats")
+print_exec_stats: bool = config.get("print_exec_stats")
 #default to print exec stats if not set
 if print_exec_stats is None:
     print_exec_stats = True
 
 folder_creation_cache = {}
-if use_global_cache:
+if global_cache is not None:
     try:
-        with open(global_cache_file, "rb") as cache:
+        with open(global_cache, "rb") as cache:
             folder_creation_cache = pickle.load(cache)
     except IOError:
         print("Could not find global cache. Creating a new one...")
@@ -68,52 +68,84 @@ exec_details = {
 # Finally, upload the files.
 for file_info in files_to_upload:
     #relative to system root
-    remote_path = file_info["remote_path"]
-    local_path = file_info["local_path"]
+    remote_root = file_info["remote_path"]
+    local_root = file_info["local_path"]
     system_id = file_info["system_id"]
 
-    system_cached_dirs = folder_creation_cache.get(system_id)
-    #system not cached, register with empty set
-    if system_cached_dirs is None:
-        system_cached_dirs = set()
-        folder_creation_cache[system_id] = system_cached_dirs
+    path_data = []
 
-    #if remote_path is not in system cache create and add to cache
-    if not remote_path in system_cached_dirs:
-        args = {
-            "body": {
-                "action": "mkdir",
-                "path": remote_path
-            },
-            "filePath": "",
-            "systemId": system_id
+    #if local path is a directory add all subfiles
+    if isdir(local_root):
+        for root, subdirs, files in os.walk(local_root):
+            for filename in files:
+                #construct local file path
+                local_path = join(root, filename)
+                #get path relative to dir being copied
+                rel_path = relpath(root, local_root)
+                #combine relative path with remote path for file destination
+                remote_path = join(remote_root, rel_path)
+                paths = {
+                    "local_path": local_path,
+                    "remote_path": remote_path
+                }
+                path_data.append(paths)
+    #if local path is just a file simply record local and remote data
+    elif isfile(local_root):
+        paths = {
+            "local_path": local_root,
+            "remote_path": remote_root
         }
-        try:
-            #will recursively create directory off of system root
-            retry_wrapper(ag.files.manage, args, (Exception), retry)
-        except Exception as e:
-            print("Unable to create directory:\nsystem: %s\path: %s\nerror: %s" % (system_id, remote_path, repr(e)), file = sys.stderr)
-        #add remote path to cache so not attempting to remake if multiple files use the same remote
-        system_cached_dirs.add(remote_path)
+        path_data.append(paths)
+    #local path does not exist, record error
+    else:
+        print("Could not find local path %s" % (local_root), file = sys.stderr)
+        exec_details["failed"].append(local_root)
 
-    rename = file_info.get("rename")
+    for paths in path_data:
+        local_path = paths["local_path"]
+        remote_path = paths["remote_path"]
+        system_cached_dirs = folder_creation_cache.get(system_id)
+        #system not cached, register with empty set
+        if system_cached_dirs is None:
+            system_cached_dirs = set()
+            folder_creation_cache[system_id] = system_cached_dirs
 
-    with open(local_path, 'rb') as localFileToUpload:
-        #pack import arguments into dict so rename can be excluded if not specified
-        args = {
-            "filePath": remote_path,
-            "fileToUpload": localFileToUpload,
-            "systemId": system_id,
-        }
-        if rename is not None:
-            args["fileName"] = rename
-        
-        try:
-            retry_wrapper(ag.files.importData, args, (Exception), retry)
-            exec_details["success"].append(local_path)
-        except Exception as e:
-            print("Unable to upload file:\nlocal: %s\nsystem: %s\nremote: %s\nerror: %s" % (local_path, system_id, remote_path, repr(e)), file = sys.stderr)
-            exec_details["failed"].append(local_path)
+        #if remote_path is not in system cache create and add to cache
+        if not remote_path in system_cached_dirs:
+            args = {
+                "body": {
+                    "action": "mkdir",
+                    "path": remote_path
+                },
+                "filePath": "",
+                "systemId": system_id
+            }
+            try:
+                #will recursively create directory off of system root
+                retry_wrapper(ag.files.manage, args, (Exception), retry)
+            except Exception as e:
+                print("Unable to create directory:\nsystem: %s\path: %s\nerror: %s" % (system_id, remote_path, repr(e)), file = sys.stderr)
+            #add remote path to cache so not attempting to remake if multiple files use the same remote
+            system_cached_dirs.add(remote_path)
+
+        rename = file_info.get("rename")
+
+        with open(local_path, 'rb') as localFileToUpload:
+            #pack import arguments into dict so rename can be excluded if not specified
+            args = {
+                "filePath": remote_path,
+                "fileToUpload": localFileToUpload,
+                "systemId": system_id,
+            }
+            if rename is not None:
+                args["fileName"] = rename
+            
+            try:
+                retry_wrapper(ag.files.importData, args, (Exception), retry)
+                exec_details["success"].append(local_path)
+            except Exception as e:
+                print("Unable to upload file:\nlocal: %s\nsystem: %s\nremote: %s\nerror: %s" % (local_path, system_id, remote_path, repr(e)), file = sys.stderr)
+                exec_details["failed"].append(local_path)
 
 
 end = time.time()
@@ -128,6 +160,6 @@ if write_exec_stats is not None:
         json.dump(exec_details, f, indent = 4)
 
 #dump cache to global if in use
-if use_global_cache:
-    with open(global_cache_file, "wb") as cache:
+if global_cache is not None:
+    with open(global_cache, "wb") as cache:
         pickle.dump(folder_creation_cache, cache)
