@@ -123,10 +123,10 @@ for file_info in files_to_upload:
             try:
                 #will recursively create directory off of system root
                 retry_wrapper(ag.files.manage, args, (Exception), retry)
+                #add remote path to cache so not attempting to remake if multiple files use the same remote
+                system_cached_dirs.add(remote_path)
             except Exception as e:
                 print("Unable to create directory:\nsystem: %s\path: %s\nerror: %s" % (system_id, remote_path, repr(e)), file = sys.stderr)
-            #add remote path to cache so not attempting to remake if multiple files use the same remote
-            system_cached_dirs.add(remote_path)
 
         rename = file_info.get("rename")
 
