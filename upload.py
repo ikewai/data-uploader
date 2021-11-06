@@ -38,10 +38,14 @@ with open("config.json", "r") as f:
 #deconstruct config
 agave_options: dict = config["agave_options"]
 files_to_upload: list = config["upload"]
-retry: int = config["retry"]
+#optional params
+retry: int = config.get("retry")
 global_cache: str = config.get("global_cache")
 write_exec_stats: str = config.get("write_exec_stats")
 print_exec_stats: bool = config.get("print_exec_stats")
+#default retry to 0
+if retry is None:
+    retry = 0
 #default to print exec stats if not set
 if print_exec_stats is None:
     print_exec_stats = True
@@ -71,6 +75,17 @@ for file_info in files_to_upload:
     remote_root = file_info["remote_path"]
     local_root = file_info["local_path"]
     system_id = file_info["system_id"]
+    #ignored if local is dir
+    rename = file_info.get("rename")
+
+    #permissions to set to remote directory
+    dir_permissions = file_info.get("dir_permissions")
+    if dir_permissions is None:
+        dir_permissions = []
+    #permissions to set to files
+    file_permissions = file_info.get("file_permissions")
+    if file_permissions is None:
+        file_permissions = []
 
     path_data = []
 
@@ -86,14 +101,19 @@ for file_info in files_to_upload:
                 remote_path = join(remote_root, rel_path)
                 paths = {
                     "local_path": local_path,
-                    "remote_path": remote_path
+                    "remote_path": remote_path,
+                    "fname": filename
                 }
                 path_data.append(paths)
     #if local path is just a file simply record local and remote data
     elif isfile(local_root):
+        fname = rename
+        if fname is None:
+            fname = os.path.basename(local_root)
         paths = {
             "local_path": local_root,
-            "remote_path": remote_root
+            "remote_path": remote_root,
+            "fname": fname
         }
         path_data.append(paths)
     #local path does not exist, record error
@@ -101,9 +121,11 @@ for file_info in files_to_upload:
         print("Could not find local path %s" % (local_root), file = sys.stderr)
         exec_details["failed"].append(local_root)
 
+    dir_created = False
     for paths in path_data:
         local_path = paths["local_path"]
         remote_path = paths["remote_path"]
+        fname = paths["fname"]
         system_cached_dirs = folder_creation_cache.get(system_id)
         #system not cached, register with empty set
         if system_cached_dirs is None:
@@ -125,27 +147,40 @@ for file_info in files_to_upload:
                 retry_wrapper(ag.files.manage, args, (Exception), retry)
                 #add remote path to cache so not attempting to remake if multiple files use the same remote
                 system_cached_dirs.add(remote_path)
+                #one of the dirs in path data has been created successfully, so remote root should exist
+                dir_created = True
             except Exception as e:
                 print("Unable to create directory:\nsystem: %s\path: %s\nerror: %s" % (system_id, remote_path, repr(e)), file = sys.stderr)
 
-        rename = file_info.get("rename")
-
+        file_created = True
         with open(local_path, 'rb') as localFileToUpload:
             #pack import arguments into dict so rename can be excluded if not specified
             args = {
                 "filePath": remote_path,
                 "fileToUpload": localFileToUpload,
                 "systemId": system_id,
+                "fileName": fname
             }
-            if rename is not None:
-                args["fileName"] = rename
-            
             try:
                 retry_wrapper(ag.files.importData, args, (Exception), retry)
                 exec_details["success"].append(local_path)
             except Exception as e:
                 print("Unable to upload file:\nlocal: %s\nsystem: %s\nremote: %s\nerror: %s" % (local_path, system_id, remote_path, repr(e)), file = sys.stderr)
                 exec_details["failed"].append(local_path)
+                file_created = False
+        #if file was successfully uploaded set permissions
+        if file_created:
+            for permission in file_permissions:
+                #combine file name with remote path
+                remote_file = join(remote_path, fname)
+                res = ag.files.updatePermissions(body = permission, filePath = remote_file, systemId = system_id)
+    
+    #if remote dir was successfully created set remote directory permissions
+    if dir_created:
+        for permission in dir_permissions:
+            #apply permission to remote root dir
+            res = ag.files.updatePermissions(body = permission, filePath = remote_root, systemId = system_id)
+
 
 
 end = time.time()
