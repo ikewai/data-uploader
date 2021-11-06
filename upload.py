@@ -21,13 +21,14 @@ def get_backoff(delay):
 
 def retry_wrapper(funct, args: dict, exceptions: tuple, retry: int, delay: float = 0):
     try:
-        funct(**args)
+        res = funct(**args)
+        return res
     except exceptions as e:
         retry -= 1
         if retry < 0:
             raise e
         backoff = get_backoff(delay)
-        retry_wrapper(funct, args, exceptions, retry, backoff)
+        return retry_wrapper(funct, args, exceptions, retry, backoff)
 
 
 config = None
@@ -151,6 +152,9 @@ for file_info in files_to_upload:
                 dir_created = True
             except Exception as e:
                 print("Unable to create directory:\nsystem: %s\path: %s\nerror: %s" % (system_id, remote_path, repr(e)), file = sys.stderr)
+        else:
+            #dir already existed, can go ahead and apply perms
+            dir_created = True
 
         file_created = True
         with open(local_path, 'rb') as localFileToUpload:
@@ -173,13 +177,29 @@ for file_info in files_to_upload:
             for permission in file_permissions:
                 #combine file name with remote path
                 remote_file = join(remote_path, fname)
-                res = ag.files.updatePermissions(body = permission, filePath = remote_file, systemId = system_id)
+                args = {
+                    "body": permission,
+                    "filePath": remote_file,
+                    "systemId": system_id
+                }
+                try:
+                    retry_wrapper(ag.files.updatePermissions, args, (Exception), retry)
+                except Exception as e:
+                    print("Unable to apply permissions to remote file:\npermissions: %s\nsystem: %s\nfile: %s\nerror: %s" % (permission, system_id, remote_file, repr(e)), file = sys.stderr)
     
     #if remote dir was successfully created set remote directory permissions
     if dir_created:
         for permission in dir_permissions:
             #apply permission to remote root dir
-            res = ag.files.updatePermissions(body = permission, filePath = remote_root, systemId = system_id)
+            args = {
+                "body": permission,
+                "filePath": remote_root,
+                "systemId": system_id
+            }
+            try:
+                retry_wrapper(ag.files.updatePermissions, args, (Exception), retry)
+            except Exception as e:
+                print("Unable to apply permissions to remote directory:\npermissions: %s\nsystem: %s\ndir: %s\nerror: %s" % (permission, system_id, remote_root, repr(e)), file = sys.stderr)
 
 
 
