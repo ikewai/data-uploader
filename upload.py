@@ -81,140 +81,148 @@ exec_details = {
 }
 
 cache_lock = Lock()
-#lists are probably threadsafe due to the GIL, but use a lock when adding items to exec_details just to be safe
+#appending to lists in exec details is probably threadsafe due to the GIL, but use a lock when adding items just to be safe
 exec_details_lock = Lock()
 
-with ThreadPool(threads) as pool:
-    def file_info_handler(file_info):
-        #relative to system root
-        remote_root = file_info["remote_path"]
-        local_root = file_info["local_path"]
-        system_id = file_info["system_id"]
-        #ignored if local is dir
-        rename = file_info.get("rename")
+#with does not work (will not properly join threads), close and join manually
+pool = ThreadPool(threads)
 
-        #permissions to set to remote directory
-        dir_permissions = file_info.get("dir_permissions")
-        if dir_permissions is None:
-            dir_permissions = []
-        #permissions to set to files
-        file_permissions = file_info.get("file_permissions")
-        if file_permissions is None:
-            file_permissions = []
+#wrapper function to keep context between loop iters
+def file_info_handler(file_info):
+    global exec_details
 
-        path_data = []
+    #relative to system root
+    remote_root = file_info["remote_path"]
+    local_root = file_info["local_path"]
+    system_id = file_info["system_id"]
+    #ignored if local is dir
+    rename = file_info.get("rename")
 
-        #if local path is a directory add all subfiles
-        if isdir(local_root):
-            for root, subdirs, files in os.walk(local_root):
-                for filename in files:
-                    #construct local file path
-                    local_path = join(root, filename)
-                    #get path relative to dir being copied
-                    rel_path = relpath(root, local_root)
-                    #combine relative path with remote path for file destination
-                    remote_path = join(remote_root, rel_path)
-                    paths = {
-                        "local_path": local_path,
-                        "remote_path": remote_path,
-                        "fname": filename
-                    }
-                    path_data.append(paths)
-        #if local path is just a file simply record local and remote data
-        elif isfile(local_root):
-            fname = rename
-            if fname is None:
-                fname = os.path.basename(local_root)
-            paths = {
-                "local_path": local_root,
-                "remote_path": remote_root,
-                "fname": fname
-            }
-            path_data.append(paths)
-        #local path does not exist, record error
-        else:
-            print("Could not find local path %s" % (local_root), file = sys.stderr)
-            with exec_details_lock:
-                exec_details["failed"].append(local_root)
+    #permissions to set to remote directory
+    dir_permissions = file_info.get("dir_permissions")
+    if dir_permissions is None:
+        dir_permissions = []
+    #permissions to set to files
+    file_permissions = file_info.get("file_permissions")
+    if file_permissions is None:
+        file_permissions = []
+
+    path_data = []
+
+    #if local path is a directory add all subfiles
+    if isdir(local_root):
+        for root, subdirs, files in os.walk(local_root):
+            for filename in files:
+                #construct local file path
+                local_path = join(root, filename)
+                #get path relative to dir being copied
+                rel_path = relpath(root, local_root)
+                #combine relative path with remote path for file destination
+                remote_path = join(remote_root, rel_path)
+                paths = {
+                    "local_path": local_path,
+                    "remote_path": remote_path,
+                    "fname": filename,
+                }
+                path_data.append(paths)
+    #if local path is just a file simply record local and remote data
+    elif isfile(local_root):
+        fname = rename
+        if fname is None:
+            fname = os.path.basename(local_root)
+        paths = {
+            "local_path": local_root,
+            "remote_path": remote_root,
+            "fname": fname
+        }
+        path_data.append(paths)
+    #local path does not exist, record error
+    else:
+        print("Could not find local path %s" % (local_root), file = sys.stderr)
+        with exec_details_lock:
+            exec_details["failed"].append(local_root)
+
+    
+
+    def path_data_handler(paths):
+        global folder_creation_cache
+        global exec_details
 
         dir_created = False
 
-        def path_data_handler(paths):
-            local_path = paths["local_path"]
-            remote_path = paths["remote_path"]
-            fname = paths["fname"]
+        local_path = paths["local_path"]
+        remote_path = paths["remote_path"]
+        fname = paths["fname"]
 
-            #lock while checking cache and creating/caching new dirs
-            with cache_lock:
-                system_cached_dirs = folder_creation_cache.get(system_id)
-                #system not cached, register with empty set
-                if system_cached_dirs is None:
-                    system_cached_dirs = set()
-                    folder_creation_cache[system_id] = system_cached_dirs
+        #lock while checking cache and creating/caching new dirs
+        with cache_lock:
+            system_cached_dirs = folder_creation_cache.get(system_id)
+            #system not cached, register with empty set
+            if system_cached_dirs is None:
+                system_cached_dirs = set()
+                folder_creation_cache[system_id] = system_cached_dirs
 
-                #if remote_path is not in system cache create and add to cache
-                if not remote_path in system_cached_dirs:
-                    args = {
-                        "body": {
-                            "action": "mkdir",
-                            "path": remote_path
-                        },
-                        "filePath": "",
-                        "systemId": system_id
-                    }
-                    try:
-                        #will recursively create directory off of system root
-                        retry_wrapper(ag.files.manage, args, (Exception), retry)
-                        #add remote path to cache so not attempting to remake if multiple files use the same remote
-                        system_cached_dirs.add(remote_path)
-                        #one of the dirs in path data has been created successfully, so remote root should exist
-                        dir_created = True
-                    except Exception as e:
-                        print("Unable to create directory:\nsystem: %s\path: %s\nerror: %s" % (system_id, remote_path, repr(e)), file = sys.stderr)
-                else:
-                    #dir already existed, can go ahead and apply perms
-                    dir_created = True
-
-            file_created = True
-            with open(local_path, 'rb') as localFileToUpload:
-                #pack import arguments into dict so rename can be excluded if not specified
+            #if remote_path is not in system cache create and add to cache
+            if not remote_path in system_cached_dirs:
                 args = {
-                    "filePath": remote_path,
-                    "fileToUpload": localFileToUpload,
-                    "systemId": system_id,
-                    "fileName": fname
+                    "body": {
+                        "action": "mkdir",
+                        "path": remote_path
+                    },
+                    "filePath": "",
+                    "systemId": system_id
                 }
                 try:
-                    retry_wrapper(ag.files.importData, args, (Exception), retry)
-                    with exec_details_lock:
-                        exec_details["success"].append(local_path)
+                    #will recursively create directory off of system root
+                    retry_wrapper(ag.files.manage, args, (Exception), retry)
+                    #add remote path to cache so not attempting to remake if multiple files use the same remote
+                    system_cached_dirs.add(remote_path)
+                    #one of the dirs in path data has been created successfully, so remote root should exist
+                    dir_created = True
                 except Exception as e:
-                    print("Unable to upload file:\nlocal: %s\nsystem: %s\nremote: %s\nerror: %s" % (local_path, system_id, remote_path, repr(e)), file = sys.stderr)
-                    with exec_details_lock:
-                        exec_details["failed"].append(local_path)
-                    file_created = False
-            #if file was successfully uploaded set permissions
-            if file_created:
-                for permission in file_permissions:
-                    #combine file name with remote path
-                    remote_file = join(remote_path, fname)
-                    args = {
-                        "body": permission,
-                        "filePath": remote_file,
-                        "systemId": system_id
-                    }
-                    try:
-                        retry_wrapper(ag.files.updatePermissions, args, (Exception), retry)
-                    except Exception as e:
-                        print("Unable to apply permissions to remote file:\npermissions: %s\nsystem: %s\nfile: %s\nerror: %s" % (permission, system_id, remote_file, repr(e)), file = sys.stderr)
+                    print("Unable to create directory:\nsystem: %s\path: %s\nerror: %s" % (system_id, remote_path, repr(e)), file = sys.stderr)
+            else:
+                #dir already existed, can go ahead and apply perms
+                dir_created = True
 
+        file_created = True
+        with open(local_path, 'rb') as localFileToUpload:
+            #pack import arguments into dict so rename can be excluded if not specified
+            args = {
+                "filePath": remote_path,
+                "fileToUpload": localFileToUpload,
+                "systemId": system_id,
+                "fileName": fname
+            }
+            try:
+                retry_wrapper(ag.files.importData, args, (Exception), retry)
+                with exec_details_lock:
+                    exec_details["success"].append(local_path)
+            except Exception as e:
+                print("Unable to upload file:\nlocal: %s\nsystem: %s\nremote: %s\nerror: %s" % (local_path, system_id, remote_path, repr(e)), file = sys.stderr)
+                with exec_details_lock:
+                    exec_details["failed"].append(local_path)
+                file_created = False
+        #if file was successfully uploaded set permissions
+        if file_created:
+            for permission in file_permissions:
+                #combine file name with remote path
+                remote_file = join(remote_path, fname)
+                args = {
+                    "body": permission,
+                    "filePath": remote_file,
+                    "systemId": system_id
+                }
+                try:
+                    retry_wrapper(ag.files.updatePermissions, args, (Exception), retry)
+                except Exception as e:
+                    print("Unable to apply permissions to remote file:\npermissions: %s\nsystem: %s\nfile: %s\nerror: %s" % (permission, system_id, remote_file, repr(e)), file = sys.stderr)
 
-        pool.map(path_data_handler, path_data)
-        
-        #this stuff relies on previous, how to handle async over multiple file items?
+        return dir_created
 
+    def permission_cb(result):
         #if remote dir was successfully created set remote directory permissions
-        if dir_created:
+        if any(result):
             for permission in dir_permissions:
                 #apply permission to remote root dir
                 args = {
@@ -227,8 +235,15 @@ with ThreadPool(threads) as pool:
                 except Exception as e:
                     print("Unable to apply permissions to remote directory:\npermissions: %s\nsystem: %s\ndir: %s\nerror: %s" % (permission, system_id, remote_root, repr(e)), file = sys.stderr)
 
-    pool.map(file_info_handler, files_to_upload)
 
+    pool.map_async(path_data_handler, path_data, callback = permission_cb)
+
+for file_info in files_to_upload:
+    file_info_handler(file_info)
+
+#close the pool and join
+pool.close()
+pool.join()
 
 end = time.time()
 duration = end - start
