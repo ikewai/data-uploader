@@ -7,10 +7,14 @@ import random
 import sys
 import time
 import os
-from os.path import join, isdir, isfile, relpath
+from os.path import join, isdir, isfile, relpath, basename, realpath, dirname
 from multiprocessing import cpu_count
 from multiprocessing.pool import ThreadPool
 from threading import Lock
+import requests
+from shutil import copyfile
+from io import TextIOWrapper, BufferedReader, IOBase
+
 
 def get_backoff(delay):
         backoff = 0
@@ -38,6 +42,12 @@ config = None
 
 with open("config.json", "r") as f:
     config = json.load(f)
+
+#construct temp dir off of script location
+temp_dir = join(dirname(realpath(__file__)), "tmp")
+#create tmp folder if it doesn't exist
+if not isdir(temp_dir):
+    os.mkdir(temp_dir)
 
 #deconstruct config
 agave_options: dict = config["agave_options"]
@@ -121,38 +131,33 @@ def file_info_handler(file_info):
                 remote_path = join(remote_root, rel_path)
                 paths = {
                     "local_path": local_path,
-                    "remote_path": remote_path,
-                    "fname": filename,
+                    "remote_path": remote_path
                 }
                 path_data.append(paths)
-    #if local path is just a file simply record local and remote data
-    elif isfile(local_root):
-        fname = rename
-        if fname is None:
-            fname = os.path.basename(local_root)
+    #otherwise simply record local and remote data
+    else:
         paths = {
             "local_path": local_root,
             "remote_path": remote_root,
-            "fname": fname
+            "rename": rename
         }
         path_data.append(paths)
-    #local path does not exist, record error
-    else:
-        print("Could not find local path %s" % (local_root), file = sys.stderr)
-        with exec_details_lock:
-            exec_details["failed"].append(local_root)
 
     
 
-    def path_data_handler(paths):
+    def path_data_handler(path_data):
         global folder_creation_cache
         global exec_details
-
+                
         dir_created = False
 
-        local_path = paths["local_path"]
-        remote_path = paths["remote_path"]
-        fname = paths["fname"]
+        local_path = path_data["local_path"]
+        remote_path = path_data["remote_path"]
+        rename = path_data.get("rename")
+
+        fname = basename(local_path)
+        if rename is not None:
+            fname = rename
 
         #lock while checking cache and creating/caching new dirs
         with cache_lock:
@@ -185,29 +190,63 @@ def file_info_handler(file_info):
                 #dir already existed, can go ahead and apply perms
                 dir_created = True
 
-        file_created = True
-        with open(local_path, 'rb') as localFileToUpload:
-            #pack import arguments into dict so rename can be excluded if not specified
+        def upload_file_data(file_data):
+            upload_exception = None
             args = {
                 "filePath": remote_path,
-                "fileToUpload": localFileToUpload,
-                "systemId": system_id,
-                "fileName": fname
+                "fileToUpload": file_data,
+                "systemId": system_id
             }
             try:
                 retry_wrapper(ag.files.importData, args, (Exception), retry)
-                with exec_details_lock:
-                    exec_details["success"].append(local_path)
             except Exception as e:
-                print("Unable to upload file:\nlocal: %s\nsystem: %s\nremote: %s\nerror: %s" % (local_path, system_id, remote_path, repr(e)), file = sys.stderr)
-                with exec_details_lock:
-                    exec_details["failed"].append(local_path)
-                file_created = False
-        #if file was successfully uploaded set permissions
-        if file_created:
-            for permission in file_permissions:
-                #combine file name with remote path
-                remote_file = join(remote_path, fname)
+                upload_exception = e
+            return upload_exception
+
+        upload_exception = None
+        temp_file = None
+        #check if the local file is remote or local file (naming should be changed, kept for compatibility)
+        is_local_file = isfile(local_path)
+        #stage the file for upload
+        try:
+            #create temp file if necessary
+            #if local file and rename then stage to temp file with new name (renaming on upload doesn't seem to work properly)
+            if is_local_file and rename is not None:
+                #copy the file and set local_path to the new file
+                temp_file = join(temp_dir, fname)
+                copyfile(local_path, temp_file)
+                #switch local path to temp file
+                local_path = temp_file
+            #if file not on local system, attempt to retrieve it as a remote file and stage to temp file for upload
+            elif not is_local_file:
+                res = requests.get(local_path, stream = True)
+                #raise for status to catch http errors
+                res.raise_for_status()
+                temp_file = join(temp_dir, fname)
+                #read remote file to temp file
+                with open(temp_file, "wb") as f:
+                    for chunk in res.iter_content(chunk_size = 4096):
+                        f.write(chunk)
+                #set local path to temp file
+                local_path = temp_file
+        except Exception as e:
+            #something went wrong while staging file (file does not exist or is inaccessible)
+            upload_exception = e
+
+        #if there was no exception staging the file, attempt to upload the file
+        if upload_exception is None:
+            with open(local_path, 'rb') as local_file_to_upload:
+                upload_exception = upload_file_data(local_file_to_upload)
+
+        #if file was successfully uploaded, log success and set permissions
+        if upload_exception is None:
+            with exec_details_lock:
+                exec_details["success"].append(local_path)
+
+            #combine file name with remote path
+            remote_file = join(remote_path, fname)
+
+            for permission in file_permissions:    
                 args = {
                     "body": permission,
                     "filePath": remote_file,
@@ -217,6 +256,15 @@ def file_info_handler(file_info):
                     retry_wrapper(ag.files.updatePermissions, args, (Exception), retry)
                 except Exception as e:
                     print("Unable to apply permissions to remote file:\npermissions: %s\nsystem: %s\nfile: %s\nerror: %s" % (permission, system_id, remote_file, repr(e)), file = sys.stderr)
+        #log failure
+        else:
+            print("Unable to upload file:\nlocal: %s\nsystem: %s\nremote: %s\nerror: %s" % (local_path, system_id, remote_path, repr(upload_exception)), file = sys.stderr)
+            with exec_details_lock:
+                exec_details["failed"].append(local_path)
+
+        #if a temporary file was created delete it
+        if temp_file is not None:
+            os.remove(local_path)
 
         return dir_created
 
@@ -235,8 +283,10 @@ def file_info_handler(file_info):
                 except Exception as e:
                     print("Unable to apply permissions to remote directory:\npermissions: %s\nsystem: %s\ndir: %s\nerror: %s" % (permission, system_id, remote_root, repr(e)), file = sys.stderr)
 
+    def error_cb(e):
+        print(f"An unexpected error occured while uploading a file: {repr(e)}", file = sys.stderr)
 
-    pool.map_async(path_data_handler, path_data, callback = permission_cb)
+    pool.map_async(path_data_handler, path_data, callback = permission_cb, error_callback = error_cb)
 
 for file_info in files_to_upload:
     file_info_handler(file_info)
