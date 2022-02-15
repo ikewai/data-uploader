@@ -2,3 +2,4 @@ dev
 *.pk
 *.json
 tmp
+__pycache__
