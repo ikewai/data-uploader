@@ -302,7 +302,7 @@ def main():
 
         return dir_created
 
-    for path_group in path_data:
+    def scope_wrapper_because_non_block_scoping_is_the_worst(path_group):
         #deconstruct path group
         upload_paths = path_group["upload_paths"]
         remote_root = path_group["remote_root"]
@@ -329,6 +329,9 @@ def main():
 
         #map out upload paths into threads and apply dir permissions upon completion
         pool.map_async(path_data_handler, upload_paths, callback = permission_cb, error_callback = error_cb)
+
+    for path_group in path_data:
+        scope_wrapper_because_non_block_scoping_is_the_worst(path_group)
 
     #close the pool and join
     pool.close()
