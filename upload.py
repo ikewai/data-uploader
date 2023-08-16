@@ -61,7 +61,7 @@ def main():
     global_cache: str = config.get("global_cache")
     write_exec_stats: str = config.get("write_exec_stats")
     print_exec_stats: bool = config.get("print_exec_stats")
-    max_backoff: float = config.get("max_backoff")
+    max_delay: float = config.get("max_backoff")
     #set max number of threads to machine cpu count
     max_threads = cpu_count()
     #if number of threads not provided, is 0 or less, or is greater than the max allowed set to the max
