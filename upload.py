@@ -2,7 +2,6 @@
 
 import json
 import pickle
-import random
 import sys
 import time
 import os
