@@ -14,22 +14,21 @@ class AgaveManager:
         self.__retries = retries
         with open(config_file, "r") as f:
             self.__config = json.load(f)
-        self.__options = options
         self.__create_con()
         self.__ag_create_lock = Lock()
 
     def __create_con(self):
         try:
-            self.__ag = Agave(**options)
+            self.__ag = Agave(**self.__config)
             self.__ag.token.create()
         #if issue creating token attempt to create new client and try again
         except HTTPError:
             self.__create_new_client()
             #if fail again just let it happen
-            self.__ag = Agave(**options)
+            self.__ag = Agave(**self.__config)
 
     def __create_new_client(self):
-        url = f"{self.__options['api_server']}/clients/v2/"
+        url = f"{self.__config['api_server']}/clients/v2/"
         client_name = f"loggernet_client_{str(uuid.uuid4())}"
         body = {
             "clientName": client_name,
@@ -37,7 +36,7 @@ class AgaveManager:
             "description": f"Created: {datetime.datetime.now().isoformat()}",
             "callbackUrl": ""
         }
-        res = post(url, json = body, auth = (self.__options.username, self.__options.password), verify = False)
+        res = post(url, json = body, auth = (self.__config.username, self.__config.password), verify = False)
         key = res.json()["result"]["consumerKey"]
         secret = res.json()["result"]["consumerSecret"]
         self.__config["api_key"] = key
