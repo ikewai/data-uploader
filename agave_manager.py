@@ -63,7 +63,7 @@ class AgaveManager:
         #check if connection trying to be recreated, if it is wait for that to finish
         with self.__ag_create_lock:
             pass
-        
+        print(funct)
         try:
             res = funct(**args)
         except exceptions as e:
