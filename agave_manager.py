@@ -96,6 +96,7 @@ class AgaveManager:
         return res
 
     def exec(self, api: str, f: str, args: dict, exceptions: tuple):
+        print(self.__ag.files.manage)
         api_o = getattr(self.__ag, api)
         f_o = getattr(self.__ag, f)
         self.__retry_wrapper(f_o, args, exceptions, self.__retries)
