@@ -63,7 +63,6 @@ class AgaveManager:
         #check if connection trying to be recreated, if it is wait for that to finish
         with self.__ag_create_lock:
             pass
-        print(funct)
         try:
             res = funct(**args)
         except exceptions as e:
@@ -98,5 +97,5 @@ class AgaveManager:
     def exec(self, api: str, f: str, args: dict, exceptions: tuple):
         print(self.__ag.files.manage)
         api_o = getattr(self.__ag, api)
-        f_o = getattr(self.__ag, f)
+        f_o = getattr(api_o, f)
         self.__retry_wrapper(f_o, args, exceptions, self.__retries)
