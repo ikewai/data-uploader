@@ -90,7 +90,7 @@ class AgaveManager:
         if retry:
             backoff = self.__get_backoff(delay)
             if self.__max_backoff is not None:
-                backoff = min(self.__max_delay, backoff)
+                backoff = min(self.__max_backoff, backoff)
             res = self.__retry_wrapper(funct, args, exceptions, retries, backoff)
 
         return res
