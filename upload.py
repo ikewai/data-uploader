@@ -14,29 +14,11 @@ from threading import Lock
 import requests
 from shutil import copyfile
 from traceback import print_exception
+from agave_manager import AgaveManager
 
-def get_backoff(delay):
-        backoff = 0
-        #if first failure backoff of 0.25-0.5 seconds
-        if delay == 0:
-            backoff = 0.25 + random.uniform(0, 0.25)
-        #otherwise 2-3x current backoff
-        else:
-            backoff = delay * 2 + random.uniform(0, delay)
-        return backoff
-
-def retry_wrapper(funct, args: dict, exceptions: tuple, retry: int, max_delay: float, delay: float = 0):
-    try:
-        res = funct(**args)
-        return res
-    except exceptions as e:
-        retry -= 1
-        if retry < 0:
-            raise e
-        backoff = get_backoff(delay)
-        if max_delay is not None:
-            backoff = min(max_delay, backoff)
-        return retry_wrapper(funct, args, exceptions, retry, max_delay, backoff)
+#should allow configuration through env or args
+CONFIG_FILE = "config.json"
+AGAVE_CONFIG_FILE = "agave_config.json"
 
 def main():
     #start execution timer
@@ -50,10 +32,9 @@ def main():
         os.mkdir(temp_dir)
     #set up configuration
     config = None
-    with open("config.json", "r") as f:
+    with open(CONFIG_FILE, "r") as f:
         config = json.load(f)
     #deconstruct config
-    agave_options: dict = config["agave_options"]
     files_to_upload: list = config["upload"]
     #optional params
     threads: int = config.get("processes")
@@ -61,7 +42,7 @@ def main():
     global_cache: str = config.get("global_cache")
     write_exec_stats: str = config.get("write_exec_stats")
     print_exec_stats: bool = config.get("print_exec_stats")
-    max_delay: float = config.get("max_backoff")
+    max_backoff: float = config.get("max_backoff")
     #set max number of threads to machine cpu count
     max_threads = cpu_count()
     #if number of threads not provided, is 0 or less, or is greater than the max allowed set to the max
@@ -175,10 +156,8 @@ def main():
             upload_tracker[local_root] = False
         path_data.append(path_group)
 
-    #initialize agave, failure will be caught by uncaught exception handler and application will exit
-    ag = Agave(**agave_options)
-    #create token
-    ag.token.create()
+    #initialize agave manager, failure will be caught by uncaught exception handler and application will exit
+    ag_manager = AgaveManager(retry, max_backoff, AGAVE_CONFIG_FILE)
 
     cache_lock = Lock()
 
@@ -219,7 +198,7 @@ def main():
                 }
                 try:
                     #will recursively create directory off of system root
-                    retry_wrapper(ag.files.manage, args, (Exception), retry, max_delay)
+                    ag_manager.exec("files", "manage", args, (Exception))
                     #add remote path to cache so not attempting to remake if multiple files use the same remote
                     system_cached_dirs.add(remote_path)
                     #one of the dirs in path data has been created successfully, so remote root should exist
@@ -238,7 +217,7 @@ def main():
                 "systemId": system_id
             }
             try:
-                retry_wrapper(ag.files.importData, args, (Exception), retry, max_delay)
+                ag_manager.exec("files", "importData", args, (Exception))
             except Exception as e:
                 upload_exception = e
             return upload_exception
@@ -292,7 +271,7 @@ def main():
                     "systemId": system_id
                 }
                 try:
-                    retry_wrapper(ag.files.updatePermissions, args, (Exception), retry, max_delay)
+                    ag_manager.exec("files", "updatePermissions", args, (Exception))
                 except Exception as e:
                     print("Unable to apply permissions to remote file:\npermissions: %s\nsystem: %s\nfile: %s\nerror: %s" % (permission, system_id, remote_file, repr(e)), file = sys.stderr)
         #log failure
