@@ -1,7 +1,6 @@
 # Data uploader for workflow automation using Agave v2 for actors and file upload.
 
 import json
-from agavepy import Agave
 import pickle
 import random
 import sys
@@ -302,7 +301,7 @@ def main():
                         "systemId": system_id
                     }
                     try:
-                        retry_wrapper(ag.files.updatePermissions, args, (Exception), retry, max_delay)
+                        ag_manager.exec("files", "updatePermissions", args, (Exception))
                     except Exception as e:
                         print("Unable to apply permissions to remote directory:\npermissions: %s\nsystem: %s\ndir: %s\nerror: %s" % (permission, system_id, remote_root, repr(e)), file = sys.stderr)
 
