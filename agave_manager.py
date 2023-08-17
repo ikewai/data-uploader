@@ -39,7 +39,7 @@ class AgaveManager:
             "description": f"Created: {datetime.datetime.now().isoformat()}",
             "callbackUrl": ""
         }
-        res = requests.post(url, json = body, auth = (self.__config.username, self.__config.password), verify = False)
+        res = requests.post(url, json = body, auth = (self.__config["username"], self.__config["password"]), verify = False)
         key = res.json()["result"]["consumerKey"]
         secret = res.json()["result"]["consumerSecret"]
         self.__config["api_key"] = key
