@@ -23,7 +23,6 @@ class AgaveManager:
         try:
             self.__ag = Agave(**self.__config)
             self.__ag.token.create()
-            raise HTTPError("test")
         #if issue creating token attempt to create new client and try again
         except HTTPError:
             self.__create_new_client()
@@ -65,8 +64,6 @@ class AgaveManager:
         with self.__ag_create_lock:
             pass
         try:
-            # if random.uniform(0, 5) > -1:
-            #     raise Exception("test")
             res = funct(**args)
         except exceptions as e:
             retries -= 1
