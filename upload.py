@@ -155,7 +155,7 @@ def main():
         path_data.append(path_group)
 
     #initialize agave manager, failure will be caught by uncaught exception handler and application will exit
-    ag_manager = AgaveManager(retry, max_backoff, AGAVE_CONFIG_FILE)
+    ag_manager = AgaveManager(AGAVE_CONFIG_FILE, retry, max_backoff)
 
     cache_lock = Lock()
 

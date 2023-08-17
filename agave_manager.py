@@ -10,7 +10,7 @@ import random
 requests.packages.urllib3.disable_warnings() 
 
 class AgaveManager:
-    def __init__(self, retries: int, max_backoff: float, config_file: str):
+    def __init__(self, config_file: str, retries: int = 0, max_backoff: float = None):
         self.__config_file = config_file
         self.__max_backoff = max_backoff
         self.__retries = retries
@@ -89,7 +89,7 @@ class AgaveManager:
 
         if retry:
             backoff = self.__get_backoff(delay)
-            if max_delay is not None:
+            if self.__max_backoff is not None:
                 backoff = min(self.__max_delay, backoff)
             res = self.__retry_wrapper(funct, args, exceptions, retries, backoff)
 
