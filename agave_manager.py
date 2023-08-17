@@ -64,7 +64,7 @@ class AgaveManager:
         with self.__ag_create_lock:
             pass
         try:
-            if random.uniform(0, 5) > 2:
+            if random.uniform(0, 5) > -1:
                 raise Exception("test")
             res = funct(**args)
         except exceptions as e:
