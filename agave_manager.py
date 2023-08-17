@@ -64,6 +64,8 @@ class AgaveManager:
         with self.__ag_create_lock:
             pass
         try:
+            if random.uniform(0, 5) > 4:
+                raise Exception("test")
             res = funct(**args)
         except exceptions as e:
             retries -= 1
@@ -95,7 +97,6 @@ class AgaveManager:
         return res
 
     def exec(self, api: str, f: str, args: dict, exceptions: tuple):
-        print(self.__ag.files.manage)
         api_o = getattr(self.__ag, api)
         f_o = getattr(api_o, f)
         self.__retry_wrapper(f_o, args, exceptions, self.__retries)
