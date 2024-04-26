@@ -7,7 +7,7 @@ import random
 import sys
 import time
 import os
-from os.path import join, isdir, isfile, relpath, basename, realpath, dirname
+from os.path import join, isdir, isfile, relpath, basename, realpath, dirname, getsize, exists
 from multiprocessing import cpu_count
 from multiprocessing.pool import ThreadPool
 from threading import Lock
@@ -62,6 +62,7 @@ def main():
     write_exec_stats: str = config.get("write_exec_stats")
     print_exec_stats: bool = config.get("print_exec_stats")
     max_delay: float = config.get("max_backoff")
+    include_empty = config.get("include_empty")
     #set max number of threads to machine cpu count
     max_threads = cpu_count()
     #if number of threads not provided, is 0 or less, or is greater than the max allowed set to the max
@@ -73,6 +74,8 @@ def main():
     #default to print exec stats if not set
     if print_exec_stats is None:
         print_exec_stats = True
+    if include_empty is None:
+        include_empty = False
     #set up folder caching and use global cache if specified
     folder_creation_cache = {}
     if global_cache is not None:
@@ -145,35 +148,44 @@ def main():
             "dir_permissions": dir_permissions,
         }
 
-        #if local path is a directory add all subfiles
-        if isdir(local_root):
-            for root, subdirs, files in os.walk(local_root):
-                for filename in files:
-                    #construct local file path
-                    local_path = join(root, filename)
-                    #get path relative to dir being copied
-                    rel_path = relpath(root, local_root)
-                    #combine relative path with remote path for file destination
-                    remote_path = join(remote_root, rel_path)
+        
+        if exists(local_root):
+            #if local path is a directory add all subfiles
+            if isdir(local_root):
+                for root, subdirs, files in os.walk(local_root):
+                    for filename in files:
+                        #construct local file path
+                        local_path = join(root, filename)
+                        if include_empty or getsize(local_path) > 0:
+                            #get path relative to dir being copied
+                            rel_path = relpath(root, local_root)
+                            #combine relative path with remote path for file destination
+                            remote_path = join(remote_root, rel_path)
+                            path_group["upload_paths"].append({
+                                "local_path": local_path,
+                                "remote_path": remote_path,
+                                "rename": None,
+                                "file_permissions": file_permissions,
+                                "system_id": system_id
+                            })
+                            upload_tracker[local_path] = False
+            #otherwise simply record local and remote data
+            else:
+                if include_empty or getsize(local_root) > 0:
                     path_group["upload_paths"].append({
-                        "local_path": local_path,
-                        "remote_path": remote_path,
-                        "rename": None,
+                        "local_path": local_root,
+                        "remote_path": remote_root,
+                        "rename": rename,
                         "file_permissions": file_permissions,
                         "system_id": system_id
                     })
-                    upload_tracker[local_path] = False
-        #otherwise simply record local and remote data
+                    upload_tracker[local_root] = False
+            #only add if a valid upload target was added
+            if len(path_group["upload_paths"]) > 0:
+                path_data.append(path_group)
         else:
-            path_group["upload_paths"].append({
-                "local_path": local_root,
-                "remote_path": remote_root,
-                "rename": rename,
-                "file_permissions": file_permissions,
-                "system_id": system_id
-            })
-            upload_tracker[local_root] = False
-        path_data.append(path_group)
+            print(f"Warning: local path {local_root} does not exist. Skipping...")
+
 
     #initialize agave, failure will be caught by uncaught exception handler and application will exit
     ag = Agave(**agave_options)
