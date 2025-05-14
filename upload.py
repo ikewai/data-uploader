@@ -82,6 +82,7 @@ def main():
     #set up folder caching
     folder_creation_cache = set() 
 
+    total_files = len(files_to_upload)
     for file_info in files_to_upload:    
         #ignored if local is dir
         rename = file_info.get("rename")
@@ -97,18 +98,16 @@ def main():
             elif isfile(src) and (include_empty or getsize(src) > 0) and rename:
                 dst = join(dst, rename)
             try:
-                print(src)
-                print(dst)
                 upload_retry(src, dst, folder_creation_cache, retry, max_delay)
                 successes += 1
             except Exception as e:
-                print(f"Failed to Error: {e}", file = sys.stderr)
+                print(f"Failed to upload file, Error: {e}", file = sys.stderr)
         else:
+            total_files -= 1
             print(f"Warning: local path {src} does not exist. Skipping...")
-        
 
     #finished, run cleanup
-    cleanup(start, len(files_to_upload), successes)
+    cleanup(start, total_files, successes)
 
 if __name__ == "__main__":
     main()
