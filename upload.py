@@ -6,13 +6,6 @@ from os.path import join, isdir, isfile, dirname, getsize, exists
 import subprocess
 from traceback import print_exception
 
-def unhandled_exception_handler(exc_type, exc_value, exc_traceback):
-    print_exception(exc_type, exc_value, exc_traceback, file = sys.stderr)
-    cleanup()
-
-sys.excepthook = unhandled_exception_handler
-
-
 
 
 def upload(src, dst, folder_creation_cache):
@@ -52,21 +45,45 @@ def upload_retry(src: str, dst: str, folder_creation_cache: set, retry: int, max
             backoff = min(max_delay, backoff)
         upload_retry(src, dst, folder_creation_cache, retry, max_delay, backoff)
         
-def cleanup(start, total, successes):
+def cleanup(upload_tracker, write_exec_stats, start):
     end = time.time()
     duration = end - start
-    print("File uploads complete: success: %d, failed: %s, time: %.2f seconds" % (successes, total - successes, duration))
+    duration = round(duration, 2)
+
+    success = []
+    failed = []
+    for file in upload_tracker:
+        if upload_tracker[file]:
+            success.append(file)
+        else:
+            failed.append(file)
+
+    num_success = success = len(success)
+    num_failed = len(failed)
+    print(f"File uploads complete: success: {num_success}, failed: {num_failed}, time: {duration} seconds")
+
+    if write_exec_stats is not None:
+        exec_details = {
+            "success": success,
+            "failed": failed,
+            "time": duration
+        }
+        with open(write_exec_stats, "w") as f:
+            json.dump(exec_details, f, indent = 4)
     
 
 def main():
     #start execution timer
     start = time.time()
-    successes = 0
+    upload_tracker = {}
 
     #set up configuration
     config = None
     with open("config.json", "r") as f:
         config = json.load(f)
+
+    retry: int = config.get("retry")
+    write_exec_stats = config.get("write_exec_stats")
     #deconstruct config
     files_to_upload: list = config["upload"]
     #optional params
@@ -80,9 +97,14 @@ def main():
     if include_empty is None:
         include_empty = False
     #set up folder caching
-    folder_creation_cache = set() 
+    folder_creation_cache = set()
 
-    total_files = len(files_to_upload)
+    def unhandled_exception_handler(exc_type, exc_value, exc_traceback):
+        print_exception(exc_type, exc_value, exc_traceback, file = sys.stderr)
+        cleanup(upload_tracker, write_exec_stats, start)
+
+    sys.excepthook = unhandled_exception_handler
+
     for file_info in files_to_upload:    
         #ignored if local is dir
         rename = file_info.get("rename")
@@ -91,6 +113,7 @@ def main():
         if not dst.endswith("/"):
             dst += "/"
         if exists(src):
+            upload_tracker["src"] = False
             #if local path is a directory ensure has trailing slash
             if isdir(src) and not src.endswith("/"):
                 src += "/"
@@ -99,15 +122,14 @@ def main():
                 dst = join(dst, rename)
             try:
                 upload_retry(src, dst, folder_creation_cache, retry, max_delay)
-                successes += 1
+                upload_tracker["src"] = True
             except Exception as e:
                 print(f"Failed to upload file, Error: {e}", file = sys.stderr)
         else:
-            total_files -= 1
             print(f"Warning: local path {src} does not exist. Skipping...")
 
     #finished, run cleanup
-    cleanup(start, total_files, successes)
+    cleanup(upload_tracker, write_exec_stats, start)
 
 if __name__ == "__main__":
     main()
