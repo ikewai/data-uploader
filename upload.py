@@ -58,7 +58,7 @@ def cleanup(upload_tracker, write_exec_stats, start):
         else:
             failed.append(file)
 
-    num_success = success = len(success)
+    num_success = len(success)
     num_failed = len(failed)
     print(f"File uploads complete: success: {num_success}, failed: {num_failed}, time: {duration} seconds")
 
