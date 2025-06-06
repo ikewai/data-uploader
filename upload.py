@@ -113,7 +113,7 @@ def main():
         if not dst.endswith("/"):
             dst += "/"
         if exists(src):
-            upload_tracker["src"] = False
+            upload_tracker[src] = False
             #if local path is a directory ensure has trailing slash
             if isdir(src) and not src.endswith("/"):
                 src += "/"
