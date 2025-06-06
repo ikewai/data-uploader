@@ -122,7 +122,7 @@ def main():
                 dst = join(dst, rename)
             try:
                 upload_retry(src, dst, folder_creation_cache, retry, max_delay)
-                upload_tracker["src"] = True
+                upload_tracker[src] = True
             except Exception as e:
                 print(f"Failed to upload file, Error: {e}", file = sys.stderr)
         else:
