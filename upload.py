@@ -113,18 +113,21 @@ def main():
         if not dst.endswith("/"):
             dst += "/"
         if exists(src):
-            upload_tracker[src] = False
-            #if local path is a directory ensure has trailing slash
-            if isdir(src) and not src.endswith("/"):
-                src += "/"
-            #otherwise if file and should be renamed add new name to dst
-            elif isfile(src) and (include_empty or getsize(src) > 0) and rename:
-                dst = join(dst, rename)
-            try:
-                upload_retry(src, dst, folder_creation_cache, retry, max_delay)
-                upload_tracker[src] = True
-            except Exception as e:
-                print(f"Failed to upload file, Error: {e}", file = sys.stderr)
+            if isfile(src) and not (include_empty or getsize(src) > 0):
+                print(f"Warning: local path {src} is empty and include_empty is set to false. Skipping...")
+            else:
+                upload_tracker[src] = False
+                #if local path is a directory ensure has trailing slash
+                if isdir(src) and not src.endswith("/"):
+                    src += "/"
+                #otherwise if file and should be renamed add new name to dst
+                elif isfile(src) and rename:
+                    dst = join(dst, rename)
+                try:
+                    upload_retry(src, dst, folder_creation_cache, retry, max_delay)
+                    upload_tracker[src] = True
+                except Exception as e:
+                    print(f"Failed to upload file, Error: {e}", file = sys.stderr)
         else:
             print(f"Warning: local path {src} does not exist. Skipping...")
 
